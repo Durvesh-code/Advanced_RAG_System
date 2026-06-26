@@ -2,19 +2,7 @@
 
 > A **Retrieval-Augmented Generation (RAG)** system built with **FastAPI**, featuring Hybrid Search (Dense + Sparse), Cross-Encoder Reranking, and GPU-accelerated embeddings — designed for intelligent, context-grounded Q&A over PDF documents.
 
----
 
-## 📌 Table of Contents
-
-- [Overview](#-overview)
-- [Architecture](#-architecture)
-- [Tech Stack](#-tech-stack)
-- [Project Structure](#-project-structure)
-- [Environment Variables](#-environment-variables)
-- [How It Works](#-how-it-works)
-- [Configuration](#-configuration)
-
----
 
 ## 🧠 Overview
 
