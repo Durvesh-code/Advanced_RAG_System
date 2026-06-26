@@ -1,0 +1,15 @@
+# requirements.txt
+fastapi
+uvicorn
+pydantic
+langchain
+langchain-openai
+langchain-groq
+chromadb
+sentence-transformers
+rank_bm25
+flashrank   # lightning-fast cross-encoder reranking
+pymupdf   # lexical search portion of the hybrid retrieval.
+langchain-huggingface
+python-dotenv
+langchain-groq
