@@ -1,135 +1,119 @@
-# 🔍 Advanced RAG Pipeline
+# Advanced RAG System
 
-> A **Retrieval-Augmented Generation (RAG)** system built with **FastAPI**, featuring Hybrid Search (Dense + Sparse), Cross-Encoder Reranking, and GPU-accelerated embeddings — designed for intelligent, context-grounded Q&A over PDF documents.
+A production-minded Retrieval-Augmented Generation prototype that focuses on **retrieval recall, candidate fusion, reranking, and evidence traceability**.
 
+## Architecture
 
-
-## 🧠 Overview
-
-This project implements a **multi-stage Retrieval-Augmented Generation (RAG)** pipeline that goes beyond basic vector search. Instead of relying on a single retrieval strategy, it fuses **semantic (dense)** and **keyword (sparse)** search, then applies a **neural cross-encoder reranker** to select only the most relevant context before passing it to the LLM.
-
-The result: fewer hallucinations, more precise answers, and citation-backed responses drawn strictly from your own documents.
-
----
-
-## 🏗️ Architecture
-
-```
-User Query
-    │
-    ▼
-┌─────────────────────────────────────────────┐
-│               FastAPI Server                │
-│  POST /ask  →  retriever  →  generator      │
-└───────────────┬─────────────────────────────┘
-                │
-    ┌───────────▼────────────┐
-    │   Hybrid Retriever     │
-    │  ┌────────┐ ┌────────┐ │
-    │  │ Dense  │ │ Sparse │ │   (Ensemble: 50/50 weight)
-    │  │ Chroma │ │  BM25  │ │
-    │  └────────┘ └────────┘ │
-    └───────────┬────────────┘
-                │  Top 20 candidates
-                ▼
-    ┌───────────────────────┐
-    │  FlashRank Reranker   │   (Cross-Encoder — picks Top 3)
-    └───────────┬───────────┘
-                │  Top 3 reranked chunks
-                ▼
-    ┌───────────────────────┐
-    │     OpenAI GPT-4o     │   (Generates grounded answer)
-    └───────────────────────┘
+```text
+Documents -> Ingestion + metadata
+                 |
+        +--------+--------+
+        |                 |
+   Dense Retrieval   Sparse Retrieval
+   embeddings        BM25
+        |                 |
+        +--------+--------+
+                 |
+            RRF Fusion
+                 |
+        Cross-Encoder Reranker
+                 |
+          Grounded LLM
+          + citations
 ```
 
----
+## Why it is challenging
 
-## 🛠️ Tech Stack
+A naive RAG app sends the top vector-search results directly to an LLM. Two failures follow: the correct passage may never be retrieved, or a superficially similar passage may outrank the useful one.
 
-| Layer | Technology |
-|---|---|
-| **API Framework** | FastAPI + Uvicorn |
-| **LLM** | OpenAI GPT-4o (`gpt-4o`) |
-| **Embeddings** | HuggingFace `all-MiniLM-L6-v2` (GPU/CUDA) |
-| **Vector Store** | ChromaDB (persistent) |
-| **Sparse Search** | BM25 (`rank_bm25`) |
-| **Reranker** | FlashRank (Cross-Encoder, lightning fast) |
-| **PDF Parsing** | PyMuPDF (`pymupdf`) |
-| **Orchestration** | LangChain |
-| **Config** | `python-dotenv` |
+This implementation separates those problems into measurable stages. Dense retrieval captures semantic similarity, BM25 protects exact terms and identifiers, Reciprocal Rank Fusion combines the ranked lists without requiring comparable raw score scales, and a cross-encoder reranks only the small fused shortlist.
 
----
+Every passage preserves its source filename and, for PDFs, page number. The API returns both the generated answer and the supporting evidence.
 
-## 📁 Project Structure
+## Stack
 
-```
-Rag/
-├── api/
-│   ├── main.py          # FastAPI app, lifespan, endpoints, CORS
-│   └── route.py         # (Additional routes)
-├── core/
-│   ├── ingestion.py     # PDF loading & recursive text chunking
-│   ├── retrieval.py     # Hybrid retriever + FlashRank reranker
-│   └── generation.py    # Prompt template + GPT-4o answer generation
-├── data/                # 📂 Drop your PDF files here
-├── vector_store/        # ChromaDB persisted embeddings (auto-created)
-├── requirements.txt
-├── .env                 # Your API keys (never commit this!)
-└── README.md
-```
+- Python + FastAPI
+- Sentence Transformers dense embeddings
+- BM25 sparse retrieval
+- Reciprocal Rank Fusion
+- Cross-encoder reranking
+- OpenAI Responses API for grounded generation
+- PyMuPDF for PDFs
+- NumPy local vector store
+- Pytest
 
----
+## Run locally
 
+```bash
+python -m venv .venv
 
-## 🔐 Environment Variables
+# Windows
+.venv\Scripts\activate
 
-Create a `.env` file in the project root (copy from the example below):
+# macOS/Linux
+source .venv/bin/activate
 
-```env
-OPENAI_API_KEY=sk-your-openai-api-key-here
+pip install -r requirements.txt
+
+copy .env.example .env   # Windows
+# cp .env.example .env   # macOS/Linux
+
+python -m scripts.ingest
+python -m uvicorn app.main:app --reload
 ```
 
-## ⚙️ How It Works
+Open `http://127.0.0.1:8000/docs` and call `POST /ask`.
 
-### Stage 1 — Ingestion (`core/ingestion.py`)
-- Scans the `data/` folder for all `.pdf` files
-- Parses pages using **PyMuPDF**
-- Splits text into 500-token chunks with 50-token overlap using `RecursiveCharacterTextSplitter`
+Put your own `.pdf`, `.md`, or `.txt` documents in `data/` and rerun ingestion.
 
-### Stage 2 — Hybrid Retrieval (`core/retrieval.py`)
-- **Dense Retriever**: Embeds chunks using `all-MiniLM-L6-v2` → stored in **ChromaDB** → fetches top-10 semantic matches
-- **Sparse Retriever**: Indexes chunks with **BM25** → fetches top-10 keyword matches
-- **Fusion**: `EnsembleRetriever` merges both result sets with equal 50/50 weighting
+## Benchmark
 
-### Stage 3 — Reranking (`core/retrieval.py`)
-- **FlashRank** cross-encoder scores all 20 combined candidates
-- Only the **top 3 highest-relevance chunks** are passed forward
+```bash
+python -m scripts.benchmark
+```
 
-### Stage 4 — Generation (`core/generation.py`)
-- A strict prompt template instructs the LLM to answer **only from the provided context**
-- **GPT-4o** generates the final answer with `temperature=0.1` to minimize hallucinations
+The benchmark reports Recall@K and MRR@K for a small hand-labeled query set. It is intended to make retrieval changes measurable rather than to claim a universal benchmark score.
 
----
+## Project structure
 
-## 🔧 Configuration
+```text
+app/
+  main.py
+  config.py
+  models.py
+  services/
+    ingestion.py
+    retrieval.py
+    reranker.py
+    generator.py
+scripts/
+  ingest.py
+  benchmark.py
+tests/
+  test_ingestion.py
+  test_retrieval.py
+data/
+  *.md
+```
 
-You can tune the pipeline behavior by modifying these values directly in the source files:
+## Design decisions
 
-| Parameter | File | Default | Description |
-|---|---|---|---|
-| `chunk_size` | `ingestion.py` | `500` | Token size per chunk |
-| `chunk_overlap` | `ingestion.py` | `50` | Overlap between chunks |
-| `dense k` | `retrieval.py` | `10` | Semantic results fetched |
-| `sparse k` | `retrieval.py` | `10` | Keyword results fetched |
-| `top_n` | `retrieval.py` | `3` | Final reranked chunks sent to LLM |
-| `model` | `generation.py` | `gpt-4o` | OpenAI model to use |
-| `temperature` | `generation.py` | `0.1` | LLM creativity (lower = more factual) |
-| `device` | `retrieval.py` | `cuda` | Embedding device (`cuda` or `cpu`) |
+**Dense + sparse retrieval:** semantic embeddings handle paraphrases while lexical search protects rare keywords and exact identifiers.
 
----
+**RRF fusion:** dense and sparse raw scores are not assumed to be comparable, so the fusion step uses rank.
 
+**Cross-encoder reranking:** the reranker jointly reads the query and candidate passage. It is applied after recall-oriented candidate generation so the expensive stage sees only a small shortlist.
 
+**Evidence traceability:** source metadata survives the entire pipeline and is exposed by the API.
 
-<div align="center">
-  Built with ❤️ using LangChain, FastAPI, and OpenAI
-</div>
+## Future work
+
+- Replace brute-force dense search with FAISS/ANN for large corpora.
+- Add query rewriting and multi-query retrieval.
+- Add parent-document retrieval.
+- Add held-out evaluation for precision, recall, latency, and answer faithfulness.
+- Add stage-level latency tracing and retrieval diagnostics.
+
+## Project story
+
+The central engineering lesson is to treat RAG as a **retrieval system first and an LLM application second**. A reranker cannot recover a passage that candidate generation missed, so retrieval recall and stage-by-stage evaluation matter more than simply swapping in a larger generator.

@@ -1,5 +1,8 @@
 .env
-vector_store/
 __pycache__/
-data/
-ALL_INFO.md
+.pytest_cache/
+.venv/
+*.pyc
+index/*.npy
+index/*.json
+index/*.pkl
